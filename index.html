@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gym">
+<meta name="theme-color" content="#111111">
+<title>Gym occupancy</title>
+<style>
+  :root { color-scheme: dark; --accent: #3ddc84; --warn: #ffb020; --bad: #ff4d4d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #111; color: #eee; padding: max(16px, env(safe-area-inset-top)) 16px 32px; }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 16px; color: #bbb; }
+  .card { background: #1c1c1c; border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+  .big { font-size: 3.4rem; font-weight: 700; line-height: 1; }
+  .big small { font-size: 1.2rem; color: #888; font-weight: 400; }
+  .status { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px;
+            font-size: .85rem; font-weight: 600; background: #333; text-transform: capitalize; }
+  .status.low { background: var(--accent); color: #000; }
+  .status.medium { background: var(--warn); color: #000; }
+  .status.high, .status.full { background: var(--bad); color: #000; }
+  .meta { color: #888; font-size: .8rem; margin-top: 10px; }
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; margin-top: 8px; }
+  .bar { flex: 1; background: #3a3a3a; border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+  .bar.now { background: var(--accent); }
+  .labels { display: flex; gap: 3px; font-size: .62rem; color: #777; margin-top: 4px; }
+  .labels span { flex: 1; text-align: center; }
+  label { display: block; font-size: .85rem; color: #aaa; margin: 12px 0 4px; }
+  input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #111;
+          color: #eee; font-size: 1rem; }
+  button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--accent); color: #000;
+           font-weight: 600; font-size: 1rem; cursor: pointer; }
+  button.secondary { background: #2a2a2a; color: #ddd; }
+  .row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .error { color: var(--bad); white-space: pre-wrap; }
+  .hint { color: #777; font-size: .78rem; margin-top: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Gym occupancy</h1>
+
+  <section id="view" hidden>
+    <div class="card">
+      <div class="big"><span id="people">–</span> <small>/ <span id="capacity">–</span></small></div>
+      <span id="status" class="status">–</span>
+      <div class="meta" id="updated"></div>
+    </div>
+    <div class="card">
+      <div style="font-size:.85rem;color:#aaa">Today, by hour</div>
+      <div class="chart" id="chart"></div>
+      <div class="labels" id="chartLabels"></div>
+    </div>
+    <div class="error" id="error"></div>
+    <div class="row">
+      <button id="refresh">Refresh</button>
+      <button id="editSettings" class="secondary">Settings</button>
+    </div>
+  </section>
+
+  <section id="setup" class="card" hidden>
+    <div style="font-weight:600">Setup</div>
+    <div class="hint" style="margin-top:4px">Saved only in this browser on this device. Nothing is sent anywhere except PureGym.</div>
+    <form id="settingsForm" autocomplete="off">
+      <label for="memberNumber">Member number (not email)</label>
+      <input id="memberNumber" required autocapitalize="off" spellcheck="false">
+      <label for="password">Password</label>
+      <input id="password" type="password" required>
+      <label for="centerId">Center id</label>
+      <input id="centerId" type="number" inputmode="numeric" value="288" required>
+      <label for="apiKey">App API key (Fw-Api-Key)</label>
+      <input id="apiKey" required autocapitalize="off" spellcheck="false">
+      <div class="row">
+        <button type="submit">Save</button>
+        <button type="button" id="clearSettings" class="secondary">Clear</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script>
+  const STORAGE_KEY = "pg-settings";
+  const AUTO_REFRESH_MS = 2 * 60 * 1000;
+  const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const $ = (id) => document.getElementById(id);
+
+  function loadSettings() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; }
+  }
+
+  function showSetup(settings) {
+    $("view").hidden = true;
+    $("setup").hidden = false;
+    if (settings) {
+      $("memberNumber").value = settings.memberNumber || "";
+      $("password").value = settings.password || "";
+      $("centerId").value = settings.centerId || 288;
+      $("apiKey").value = settings.apiKey || "";
+    }
+  }
+
+  function showView() {
+    $("setup").hidden = true;
+    $("view").hidden = false;
+  }
+
+  async function fetchStats(s) {
+    const auth = btoa(unescape(encodeURIComponent(`${s.memberNumber}:${s.password}`)));
+    const res = await fetch(`https://mit.puregym.dk/api/v1.0.0/centers/stats/${encodeURIComponent(s.centerId)}`, {
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "Fw-Api-Key": s.apiKey,
+        "App-Identifier": "com.shapehq.fitnessworld.ios"
+      },
+      cache: "no-store"
+    });
+    if (res.status === 401 || res.status === 403) throw new Error("Login failed - check member number, password and API key in Settings.");
+    if (!res.ok) throw new Error(`PureGym returned ${res.status}.`);
+    const json = await res.json();
+    const list = json?.data?.list;
+    if (!list?.capacity) throw new Error("Unexpected response - PureGym may have changed their API.");
+    return list;
+  }
+
+  function render(list) {
+    const cap = list.capacity;
+    $("title").textContent = list.centerName || "Gym occupancy";
+    $("people").textContent = cap.people_in_center;
+    $("capacity").textContent = cap.max_capacity;
+    $("status").textContent = cap.capacity_status || "–";
+    $("status").className = "status " + (cap.capacity_status || "");
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
+
+    const now = new Date();
+    const points = cap.chart_data?.[DAYS[now.getDay()]] || [];
+    const max = Math.max(1, cap.max_capacity, ...points.map(p => p.people_in_center));
+    $("chart").innerHTML = "";
+    $("chartLabels").innerHTML = "";
+    for (const p of points) {
+      const bar = document.createElement("div");
+      bar.className = "bar" + (p.hour === now.getHours() ? " now" : "");
+      bar.style.height = (p.people_in_center / max * 100) + "%";
+      bar.title = `${String(p.hour).padStart(2, "0")}:00 - ${p.people_in_center}`;
+      $("chart").appendChild(bar);
+      const label = document.createElement("span");
+      label.textContent = p.hour % 3 === 0 ? p.hour : "";
+      $("chartLabels").appendChild(label);
+    }
+  }
+
+  async function refresh() {
+    const s = loadSettings();
+    if (!s) return showSetup();
+    showView();
+    $("error").textContent = "";
+    $("refresh").disabled = true;
+    try {
+      render(await fetchStats(s));
+    } catch (e) {
+      $("error").textContent = e.message || String(e);
+    } finally {
+      $("refresh").disabled = false;
+    }
+  }
+
+  $("settingsForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      memberNumber: $("memberNumber").value.trim(),
+      password: $("password").value,
+      centerId: $("centerId").value.trim() || "288",
+      apiKey: $("apiKey").value.trim()
+    }));
+    refresh();
+  });
+  $("clearSettings").addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); showSetup(); $("settingsForm").reset(); });
+  $("editSettings").addEventListener("click", () => showSetup(loadSettings()));
+  $("refresh").addEventListener("click", refresh);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && loadSettings()) refresh(); });
+  setInterval(() => { if (!document.hidden && loadSettings()) refresh(); }, AUTO_REFRESH_MS);
+
+  refresh();
+</script>
+</body>
+</html>
