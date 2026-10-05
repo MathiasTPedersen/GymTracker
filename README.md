@@ -37,7 +37,7 @@ asks search engines not to list it.
 
 ## Behavior
 
-- Refreshes automatically every 2 minutes while open, and whenever you switch back to it.
+- Loads once when opened; after that it only updates when you press **Refresh**.
 - The current hour is highlighted in the chart.
 
 This depends on an undocumented PureGym API and may stop working if PureGym

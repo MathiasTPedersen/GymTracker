@@ -85,7 +85,6 @@
 
 <script>
   const STORAGE_KEY = "pg-settings";
-  const AUTO_REFRESH_MS = 2 * 60 * 1000;
   const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   const $ = (id) => document.getElementById(id);
 
@@ -181,8 +180,6 @@
   $("clearSettings").addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); showSetup(); $("settingsForm").reset(); });
   $("editSettings").addEventListener("click", () => showSetup(loadSettings()));
   $("refresh").addEventListener("click", refresh);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && loadSettings()) refresh(); });
-  setInterval(() => { if (!document.hidden && loadSettings()) refresh(); }, AUTO_REFRESH_MS);
 
   refresh();
 </script>
